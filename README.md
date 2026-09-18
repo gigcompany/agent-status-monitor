@@ -1,9 +1,20 @@
 # Agent Status Monitor
 
-See what every one of your AI coding agents is doing — Claude Code, Codex,
-Hermes, or anything else that can run a shell command — whether it's running
-on your laptop or on a server across the world. Get notified the moment one
-finishes or needs you.
+If you're running one agent, you don't need this. If you're running
+several — Claude Code in one terminal, Codex in another, a handful of
+Hermes profiles on your laptop and a few more on a remote server — you
+already know the actual problem isn't getting the agents to do the work.
+It's keeping track of them once they're running: which one did you ask to
+fix the billing bug, three terminals and twenty minutes ago? Is the deploy
+agent still working, or did it finish and you just haven't looked? That one
+from an hour back — is it done, or has it been sitting there the whole time
+needing an answer you never saw?
+
+This exists to answer those questions in one place, across every agent,
+every harness, every machine — instead of tabbing through terminals trying
+to remember what you set in motion. One board, everything reports to it,
+your phone or your menu bar tells you the moment something actually needs
+you.
 
 <table>
 <tr>
@@ -12,8 +23,8 @@ finishes or needs you.
 </tr>
 </table>
 
-A macOS menu bar app and an Android app both read the same board. Agents
-write to it with one CLI command, wherever they happen to be running.
+Every agent reports with one CLI command, regardless of what it's running
+on or under.
 
 ## Install
 
