@@ -136,7 +136,12 @@ case "$BACKEND" in
         ;;
     supabase)
         if ! grep -qE '^AGENT_STATUS_SUPABASE_URL=.+' "$CONFIG"; then
-            if [[ -t 0 ]]; then
+            if [[ -n "${AGENT_STATUS_SUPABASE_URL:-}" && -n "${AGENT_STATUS_SUPABASE_KEY:-}" ]]; then
+                # Real env vars, e.g. for a one-shot `curl | bash` on a
+                # headless box where there's no TTY to prompt on.
+                set_cfg AGENT_STATUS_SUPABASE_URL "$AGENT_STATUS_SUPABASE_URL"
+                set_cfg AGENT_STATUS_SUPABASE_KEY "$AGENT_STATUS_SUPABASE_KEY"
+            elif [[ -t 0 ]]; then
                 echo
                 info "Create a project at supabase.com, run backends/supabase/schema.sql"
                 info "in its SQL Editor, then paste the values from Settings -> API."
@@ -147,7 +152,7 @@ case "$BACKEND" in
                 set_cfg AGENT_STATUS_SUPABASE_URL "$sb_url"
                 set_cfg AGENT_STATUS_SUPABASE_KEY "$sb_key"
             else
-                fail "supabase needs AGENT_STATUS_SUPABASE_URL and _KEY in $CONFIG"
+                fail "supabase needs AGENT_STATUS_SUPABASE_URL and _KEY - set them as env vars for a piped install, or in $CONFIG"
             fi
         fi
         grep -qE '^AGENT_STATUS_SUPABASE_TABLE=' "$CONFIG" || set_cfg AGENT_STATUS_SUPABASE_TABLE agent_tasks
