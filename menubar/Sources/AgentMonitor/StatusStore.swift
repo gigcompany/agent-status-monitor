@@ -14,42 +14,61 @@ final class StatusStore: ObservableObject {
     private var seen: [String: String] = [:]
     private let seenKey = "seenStatuses"
 
-    /// Finished tasks the user has cleared from the popup. This only affects
-    /// what this Mac's app displays - it never touches the backend, so other
-    /// machines and macOS notifications are untouched.
-    @Published private(set) var dismissedIds: Set<String> = []
-    private let dismissedKey = "dismissedTaskIds"
+    /// Tasks the user has cleared from the popup, and the `updatedAt` each one
+    /// had at the moment they cleared it. This only affects what this Mac's
+    /// app displays - it never touches the backend, so other machines and
+    /// macOS notifications are untouched.
+    ///
+    /// Nothing is exempt from clearing: a "waiting" task can sit abandoned for
+    /// hours (an orphaned session, a permission prompt nobody will ever
+    /// answer), and the user should be able to get it off their screen same
+    /// as anything else. Recording the timestamp rather than a flat id set is
+    /// what makes that safe for live tasks specifically - unlike `done`/
+    /// `failed`, a `waiting`/`working` task can receive a genuinely new update
+    /// after being cleared (a retried turn, a new question), and that should
+    /// reappear rather than stay silenced forever.
+    @Published private(set) var dismissedAt: [String: TimeInterval] = [:]
+    private let dismissedKey = "dismissedTaskUpdatedAt"
 
     private var pollTask: Task<Void, Never>?
     private var isFirstLoad = true
 
     init() {
         seen = UserDefaults.standard.dictionary(forKey: seenKey) as? [String: String] ?? [:]
-        dismissedIds = Set(UserDefaults.standard.stringArray(forKey: dismissedKey) ?? [])
+        dismissedAt = UserDefaults.standard.dictionary(forKey: dismissedKey) as? [String: TimeInterval] ?? [:]
         reloadConfig()
     }
 
-    var waitingTasks: [AgentTask] { tasks.filter { $0.status == .waiting } }
-    var workingTasks: [AgentTask] { tasks.filter { $0.status == .working && !$0.isStale } }
+    private func isDismissed(_ task: AgentTask) -> Bool {
+        guard let clearedAt = dismissedAt[task.id] else { return false }
+        let updated = task.updatedAt?.timeIntervalSince1970 ?? 0
+        return updated <= clearedAt
+    }
 
-    /// What the popup actually shows: live tasks always, finished ones only
-    /// until the user clears them.
-    var visibleTasks: [AgentTask] { tasks.filter { !dismissedIds.contains($0.id) } }
+    /// What the popup actually shows: everything, minus what the user cleared
+    /// and hasn't changed since.
+    var visibleTasks: [AgentTask] { tasks.filter { !isDismissed($0) } }
 
-    /// Hides every currently finished task from the popup. Live tasks
-    /// (working/waiting) are never dismissable - they still need attention or
-    /// are still in progress, so hiding them would just be confusing.
+    // The menu bar badge counts what's actually visible, so clearing a task
+    // here and the badge disagreeing about whether it still "needs you" can't
+    // happen.
+    var waitingTasks: [AgentTask] { visibleTasks.filter { $0.status == .waiting } }
+    var workingTasks: [AgentTask] { visibleTasks.filter { $0.status == .working && !$0.isStale } }
+
+    /// Hides every currently visible task from the popup, regardless of
+    /// status. Any of them that later receives a genuinely new update (a new
+    /// `updatedAt`) reappears on its own - clearing silences the current
+    /// state, not all future state for that task.
     @discardableResult
-    func dismissFinishedTasks() -> Int {
-        let toDismiss = tasks
-            .filter { $0.status == .done || $0.status == .failed }
-            .map(\.id)
-        let newlyDismissed = Set(toDismiss).subtracting(dismissedIds)
-        guard !newlyDismissed.isEmpty else { return 0 }
-
-        dismissedIds.formUnion(newlyDismissed)
-        UserDefaults.standard.set(Array(dismissedIds), forKey: dismissedKey)
-        return newlyDismissed.count
+    func dismissAllTasks() -> Int {
+        var newlyDismissed = 0
+        for task in tasks where !isDismissed(task) {
+            dismissedAt[task.id] = task.updatedAt?.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+            newlyDismissed += 1
+        }
+        guard newlyDismissed > 0 else { return 0 }
+        UserDefaults.standard.set(dismissedAt, forKey: dismissedKey)
+        return newlyDismissed
     }
 
     /// What the menu bar icon shows at a glance.
@@ -161,12 +180,12 @@ final class StatusStore: ObservableObject {
         seen = seen.filter { live.contains($0.key) }
         if seen.count != before { changed = true }
 
-        // Same for dismissed ids - once a cleared task expires off the backend
-        // entirely, there is nothing left to keep hidden.
-        let beforeDismissed = dismissedIds.count
-        dismissedIds.formIntersection(live)
-        if dismissedIds.count != beforeDismissed {
-            UserDefaults.standard.set(Array(dismissedIds), forKey: dismissedKey)
+        // Same for dismissed bookkeeping - once a cleared task expires off the
+        // backend entirely, there is nothing left to keep hidden.
+        let beforeDismissed = dismissedAt.count
+        dismissedAt = dismissedAt.filter { live.contains($0.key) }
+        if dismissedAt.count != beforeDismissed {
+            UserDefaults.standard.set(dismissedAt, forKey: dismissedKey)
         }
 
         if changed {

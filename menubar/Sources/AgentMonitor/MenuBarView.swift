@@ -157,13 +157,14 @@ struct MenuBarView: View {
         .padding(14)
     }
 
-    /// Hides finished tasks from this popup only - purely local UI state, no
-    /// effect on macOS notifications and no effect on the shared backend, so
-    /// other machines and viewers are unaffected.
-    private func clearFinishedTasks() {
-        let count = store.dismissFinishedTasks()
+    /// Hides everything currently shown from this popup - purely local UI
+    /// state, no effect on macOS notifications and no effect on the shared
+    /// backend, so other machines and viewers are unaffected. A cleared task
+    /// that later receives a genuinely new update reappears on its own.
+    private func clearAllTasks() {
+        let count = store.dismissAllTasks()
         clearStatus = count > 0
-            ? "Cleared \(count) finished task\(count == 1 ? "" : "s")."
+            ? "Cleared \(count) task\(count == 1 ? "" : "s")."
             : "Nothing to clear."
 
         clearStatusTask?.cancel()
@@ -209,12 +210,12 @@ struct MenuBarView: View {
             }
 
             Button {
-                clearFinishedTasks()
+                clearAllTasks()
             } label: {
                 Label("Clear", systemImage: "eraser")
             }
-            .help("Hide finished tasks from this list")
-            .disabled(!store.visibleTasks.contains { $0.status == .done || $0.status == .failed })
+            .help("Clear everything from this list")
+            .disabled(store.visibleTasks.isEmpty)
 
             Button {
                 showingSettings.toggle()

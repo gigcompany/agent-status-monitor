@@ -11,7 +11,7 @@ import {
 } from "react-native-paper";
 import { AppConfig, isConfigured } from "../config";
 import { fetchTasks } from "../api";
-import { loadDismissed, saveDismissed } from "../dismissed";
+import { DismissedMap, loadDismissed, saveDismissed } from "../dismissed";
 import {
   AgentTask,
   STATUS_LABEL,
@@ -60,7 +60,7 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [dismissed, setDismissed] = useState<DismissedMap>({});
   const [snackbar, setSnackbar] = useState<string | null>(null);
   const inFlight = useRef(false);
 
@@ -87,8 +87,9 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
         // nothing left to keep hidden once the backend no longer returns them.
         const live = new Set(fetched.map((t) => t.id));
         setDismissed((prev) => {
-          const pruned = new Set([...prev].filter((id) => live.has(id)));
-          if (pruned.size !== prev.size) {
+          const entries = Object.entries(prev).filter(([id]) => live.has(id));
+          if (entries.length !== Object.keys(prev).length) {
+            const pruned = Object.fromEntries(entries);
             saveDismissed(pruned);
             return pruned;
           }
@@ -112,22 +113,23 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
     return () => clearInterval(id);
   }, [refresh, config.pollSeconds]);
 
-  // Live tasks (working/waiting) are never dismissable - hiding one that
-  // still needs attention or is still in progress would just be confusing.
-  const visibleTasks = tasks.filter((t) => !dismissed.has(t.id));
-  const clearableCount = visibleTasks.filter(
-    (t) => t.status === "done" || t.status === "failed"
-  ).length;
+  // A task is hidden only if it hasn't changed since it was cleared - one
+  // that later receives a genuinely new update (a retried turn, a new
+  // question) reappears on its own rather than staying silenced forever.
+  function isDismissed(task: AgentTask): boolean {
+    const clearedAt = dismissed[task.id];
+    if (!clearedAt) return false;
+    return (task.updatedAt ?? "") <= clearedAt;
+  }
+
+  const visibleTasks = tasks.filter((t) => !isDismissed(t));
 
   function handleClear() {
-    const toDismiss = tasks
-      .filter((t) => t.status === "done" || t.status === "failed")
-      .map((t) => t.id);
-    const next = new Set(dismissed);
+    const next: DismissedMap = { ...dismissed };
     let added = 0;
-    for (const id of toDismiss) {
-      if (!next.has(id)) {
-        next.add(id);
+    for (const task of tasks) {
+      if (!isDismissed(task)) {
+        next[task.id] = task.updatedAt ?? new Date().toISOString();
         added++;
       }
     }
@@ -135,11 +137,13 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
       setDismissed(next);
       saveDismissed(next);
     }
-    setSnackbar(added > 0 ? `Cleared ${added} finished task${added === 1 ? "" : "s"}.` : "Nothing to clear.");
+    setSnackbar(added > 0 ? `Cleared ${added} task${added === 1 ? "" : "s"}.` : "Nothing to clear.");
   }
 
-  const waitingCount = tasks.filter((t) => t.status === "waiting").length;
-  const workingCount = tasks.filter((t) => t.status === "working" && !isStale(t)).length;
+  // Counts what's actually visible, so the bell badge and the list can't
+  // disagree about whether something still "needs you".
+  const waitingCount = visibleTasks.filter((t) => t.status === "waiting").length;
+  const workingCount = visibleTasks.filter((t) => t.status === "working" && !isStale(t)).length;
   const sections = groupByStatus(visibleTasks);
 
   return (
@@ -154,7 +158,7 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
             </Badge>
           </View>
         )}
-        <Appbar.Action icon="eraser" onPress={handleClear} disabled={clearableCount === 0} />
+        <Appbar.Action icon="eraser" onPress={handleClear} disabled={visibleTasks.length === 0} />
         <Appbar.Action icon="cog" onPress={onOpenSettings} />
       </Appbar.Header>
 
