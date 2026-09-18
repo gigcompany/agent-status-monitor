@@ -80,8 +80,11 @@ If `agent-status` is not found or reports it is not configured, the user needs t
 run the installer once on this machine:
 
 ```bash
-<repo>/install.sh                     # this machine
-<repo>/install-remote.sh user@host    # a remote agent box
+./install.sh              # from a cloned repo, on this machine
 ```
+
+On a remote box, see the README's "Setting up a cloud server or remote
+agent box" section - a `curl | bash` one-liner, or a self-contained prompt
+another agent on that box can run for you.
 
 Tell the user that rather than trying to configure the backend yourself.

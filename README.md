@@ -5,19 +5,12 @@ Hermes, or anything else that can run a shell command — whether it's running
 on your laptop or on a server across the world. Get notified the moment one
 finishes or needs you.
 
-```
-  [?2]  <- macOS menu bar: 2 agents are waiting on you
-
-  NEEDS YOU
-  ? Migrate billing tests to pytest
-    Bump the minor version before I tag the release?
-    Codex (macbook-air) · billing · 4m ago
-
-  WORKING
-  * Scrape competitor pricing pages
-    42 of 120 pages fetched
-    Hermes (vps-mumbai) · 3/5 · 12s ago
-```
+<table>
+<tr>
+<td width="60%"><img src="docs/menubar-screenshot.jpg" alt="macOS menu bar app showing agent tasks grouped by status"></td>
+<td width="40%"><img src="docs/android-screenshot.png" alt="Android app showing the same board"></td>
+</tr>
+</table>
 
 A macOS menu bar app and an Android app both read the same board. Agents
 write to it with one CLI command, wherever they happen to be running.
@@ -108,56 +101,42 @@ bar app, `local` is fine and this doesn't apply.
 ## Setting up a cloud server or remote agent box
 
 Anywhere your agents actually *run* — a VPS, a droplet, a spare Linux box —
-needs the CLI, not the app. Two ways to get it there, depending on whether
-you can SSH in from your laptop.
-
-### From your laptop, over SSH (recommended)
+needs the CLI, not the app. Run this directly on that machine (SSH in first
+if it's remote):
 
 ```bash
-./install-remote.sh user@your-server --kind hermes --label "Hermes (scraper)"
+curl -fsSL https://raw.githubusercontent.com/gigcompany/agent-status-monitor/main/install.sh -o install.sh
+AGENT_STATUS_SUPABASE_URL="https://xxx.supabase.co" AGENT_STATUS_SUPABASE_KEY="your-anon-key" bash install.sh --backend supabase --hooks --no-app
 ```
 
-This reads the backend credentials already configured on your laptop, copies
-just the CLI script and skill over SSH (no git clone needed on the far
-side — python3 is the only requirement), and writes the remote's config.
-Credentials are piped over the existing SSH session, never passed as CLI
-arguments, so they never land in the remote's shell history or process list.
+Use the *same* Supabase project and key as your laptop, so both machines
+write to one board. Two things worth knowing about this exact form:
 
-`--kind` sets what shows up on the board (`hermes`, `codex`, `claude-code`,
-or anything else you want as a label prefix); `--label`/`--id` override the
-auto-generated agent name if you want something more specific than
-`hermes@your-server`.
+- **It's two separate commands on purpose.** Piping `curl` straight into
+  `bash` with flags after it is a classic footgun — the flags can end up
+  going to `curl` instead of the script, which just fails with `curl:
+  option --no-app: is unknown`. Downloading first sidesteps that entirely.
+- **The credentials are real environment variables**, not `.env` file
+  contents — that's what lets this run non-interactively in one shot. If
+  you paste them as separate `VAR="value"` lines instead of on the same
+  line as `bash install.sh`, they won't reach the script (no `export`, so
+  they're invisible to the child process) - it'll just fall back to
+  prompting you interactively instead, which still works fine if you're at
+  a real terminal, just isn't one shot.
 
-> The `local` backend can't be used this way — it's a SQLite file on one
-> machine, invisible to anywhere else. `install-remote.sh` refuses outright
-> if your laptop is configured for `local`, rather than silently doing
-> nothing.
-
-### Directly on the server (no SSH access from your laptop)
-
-```bash
-git clone https://github.com/gigcompany/agent-status-monitor.git
-cd agent-status-monitor
-cp .env.example .env   # fill in the SAME Supabase credentials as your laptop
-./install.sh --backend supabase --hooks --no-app
-```
-
-(`--backend supabase` is required here - `local` is the installer's default,
-but a server's `local` board would be its own, invisible to your laptop.)
+`--no-app` skips the menu bar app entirely — it's macOS-only, and most
+servers have no GUI. `--hooks` wires lifecycle hooks into every Hermes
+profile it finds on that machine, not just `default`.
 
 ### Easiest of all: have an agent already on that box do it
 
 If there's already an AI agent running on the remote server with shell
 access - a Hermes profile, Claude Code, Codex, whatever - paste it
 [**this prompt**](REMOTE-AGENT-PROMPT.md) instead of typing commands
-yourself. It downloads and runs the installer, then does the Hermes-specific
+yourself. It runs the install above, then does the Hermes-specific
 follow-up every profile needs (approve the hooks, restart any gateway that
-was already running, verify each one actually went clean) - the exact steps
-in the sections above, done for you across however many profiles are on
-that box.
-
-`--no-app` skips the menu bar app build entirely — most servers don't have a
-GUI, and even the ones that do don't need a second copy of the app running.
+was already running, verify each one actually went clean) - across however
+many profiles are on that box, without you typing any of it by hand.
 
 ## Backends
 
@@ -357,9 +336,11 @@ over automatically, no code change needed.
   read/write to anyone holding it, under a permissive RLS policy. Use a
   dedicated project, not one with anything sensitive already in it. `local`
   has no equivalent risk - nothing ever leaves the machine.
-- Config files are written `0600`; `install-remote.sh` pipes keys over the
-  existing SSH session rather than passing them as arguments, so they never
-  land in the remote process list or shell history.
+- Config files are written `0600`. The remote install does put the anon key
+  on that machine's own command line and shell history, since you're typing
+  it directly into a terminal you're already SSHed into or an agent is
+  already running in - fine for a box only you administer, worth knowing if
+  it isn't.
 - **Task text leaves your machine** on `supabase`. Keep secrets out of task
   descriptions, or use `local`, where nothing leaves the machine at all.
 - Revoking one remote agent means rotating the shared key and re-running the

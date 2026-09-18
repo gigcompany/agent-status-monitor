@@ -10,10 +10,11 @@ hit while actually using it.
 skill/agent-status/scripts/agent_status.py   the CLI - single file, stdlib only, no pip install
 skill/agent-status/SKILL.md                  what it teaches an agent to do and when
 backends/supabase/schema.sql                 Postgres schema for the default backend
-install.sh / install-remote.sh               installers (local machine / remote SSH)
+install.sh                                   the installer - local machine or remote, same script
 .env.example                                 every config key, with defaults and comments
 menubar/                                     macOS menu bar app (Swift / SwiftUI)
 mobile/                                      Android app (Expo / React Native / TypeScript)
+REMOTE-AGENT-PROMPT.md                       paste-able prompt for an agent-driven remote install
 ```
 
 Each surface is documented where it lives: [`README.md`](README.md) for the

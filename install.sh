@@ -399,6 +399,6 @@ Try it:
   agent-status wait --question "does the notification arrive?"
   agent-status done --summary "it does"
 
-Remote agents:
-  ./install-remote.sh user@host --kind hermes
+Setting this up on a remote server too? See:
+  https://github.com/gigcompany/agent-status-monitor#setting-up-a-cloud-server-or-remote-agent-box
 NEXT
