@@ -145,6 +145,17 @@ cp .env.example .env   # fill in the SAME Supabase credentials as your laptop
 (`--backend supabase` is required here - `local` is the installer's default,
 but a server's `local` board would be its own, invisible to your laptop.)
 
+### Easiest of all: have an agent already on that box do it
+
+If there's already an AI agent running on the remote server with shell
+access - a Hermes profile, Claude Code, Codex, whatever - paste it
+[**this prompt**](REMOTE-AGENT-PROMPT.md) instead of typing commands
+yourself. It downloads and runs the installer, then does the Hermes-specific
+follow-up every profile needs (approve the hooks, restart any gateway that
+was already running, verify each one actually went clean) - the exact steps
+in the sections above, done for you across however many profiles are on
+that box.
+
 `--no-app` skips the menu bar app build entirely — most servers don't have a
 GUI, and even the ones that do don't need a second copy of the app running.
 
