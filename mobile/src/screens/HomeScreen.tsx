@@ -5,11 +5,13 @@ import {
   Appbar,
   Badge,
   Icon,
+  Snackbar,
   Text,
   useTheme,
 } from "react-native-paper";
 import { AppConfig, isConfigured } from "../config";
 import { fetchTasks } from "../api";
+import { loadDismissed, saveDismissed } from "../dismissed";
 import {
   AgentTask,
   STATUS_LABEL,
@@ -58,7 +60,13 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [snackbar, setSnackbar] = useState<string | null>(null);
   const inFlight = useRef(false);
+
+  useEffect(() => {
+    loadDismissed().then(setDismissed);
+  }, []);
 
   const refresh = useCallback(
     async (showSpinner: boolean) => {
@@ -74,6 +82,18 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
         setTasks(fetched);
         setError(null);
         setLastUpdated(new Date());
+
+        // Forget dismissals for tasks that have aged out of the window -
+        // nothing left to keep hidden once the backend no longer returns them.
+        const live = new Set(fetched.map((t) => t.id));
+        setDismissed((prev) => {
+          const pruned = new Set([...prev].filter((id) => live.has(id)));
+          if (pruned.size !== prev.size) {
+            saveDismissed(pruned);
+            return pruned;
+          }
+          return prev;
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load");
       } finally {
@@ -92,9 +112,35 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
     return () => clearInterval(id);
   }, [refresh, config.pollSeconds]);
 
+  // Live tasks (working/waiting) are never dismissable - hiding one that
+  // still needs attention or is still in progress would just be confusing.
+  const visibleTasks = tasks.filter((t) => !dismissed.has(t.id));
+  const clearableCount = visibleTasks.filter(
+    (t) => t.status === "done" || t.status === "failed"
+  ).length;
+
+  function handleClear() {
+    const toDismiss = tasks
+      .filter((t) => t.status === "done" || t.status === "failed")
+      .map((t) => t.id);
+    const next = new Set(dismissed);
+    let added = 0;
+    for (const id of toDismiss) {
+      if (!next.has(id)) {
+        next.add(id);
+        added++;
+      }
+    }
+    if (added > 0) {
+      setDismissed(next);
+      saveDismissed(next);
+    }
+    setSnackbar(added > 0 ? `Cleared ${added} finished task${added === 1 ? "" : "s"}.` : "Nothing to clear.");
+  }
+
   const waitingCount = tasks.filter((t) => t.status === "waiting").length;
   const workingCount = tasks.filter((t) => t.status === "working" && !isStale(t)).length;
-  const sections = groupByStatus(tasks);
+  const sections = groupByStatus(visibleTasks);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
@@ -105,6 +151,7 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
             {waitingCount}
           </Badge>
         )}
+        <Appbar.Action icon="eraser" onPress={handleClear} disabled={clearableCount === 0} />
         <Appbar.Action icon="cog" onPress={onOpenSettings} />
       </Appbar.Header>
 
@@ -140,12 +187,16 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
         </View>
       ) : sections.length === 0 ? (
         <View style={styles.centered}>
-          <Icon source="moon-waning-crescent" size={32} color={theme.colors.onSurfaceVariant} />
+          <Icon
+            source={tasks.length > 0 ? "check-all" : "moon-waning-crescent"}
+            size={32}
+            color={theme.colors.onSurfaceVariant}
+          />
           <Text variant="bodyMedium" style={{ marginTop: 8, color: theme.colors.onSurfaceVariant }}>
-            No agent activity
+            {tasks.length > 0 ? "All caught up" : "No agent activity"}
           </Text>
           <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-            in the last {config.lookbackHours}h
+            {tasks.length > 0 ? "Finished tasks cleared" : `in the last ${config.lookbackHours}h`}
           </Text>
         </View>
       ) : (
@@ -170,6 +221,10 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
           renderItem={({ item }) => <TaskRow task={item} />}
         />
       )}
+
+      <Snackbar visible={snackbar !== null} onDismiss={() => setSnackbar(null)} duration={3000}>
+        {snackbar}
+      </Snackbar>
     </View>
   );
 }
