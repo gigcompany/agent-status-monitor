@@ -147,9 +147,12 @@ export default function HomeScreen({ config, onOpenSettings }: Props) {
       <Appbar.Header>
         <Appbar.Content title="Agents" subtitle={lastUpdated ? lastUpdated.toLocaleTimeString() : undefined} />
         {waitingCount > 0 && (
-          <Badge style={{ backgroundColor: theme.colors.error, marginRight: 8 }}>
-            {waitingCount}
-          </Badge>
+          <View style={styles.bellWrap}>
+            <Icon source="bell-alert" size={22} color={theme.colors.error} />
+            <Badge size={16} style={[styles.bellBadge, { backgroundColor: theme.colors.error }]}>
+              {waitingCount}
+            </Badge>
+          </View>
         )}
         <Appbar.Action icon="eraser" onPress={handleClear} disabled={clearableCount === 0} />
         <Appbar.Action icon="cog" onPress={onOpenSettings} />
@@ -288,6 +291,8 @@ function TaskRow({ task }: { task: AgentTask }) {
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   banner: { flexDirection: "row", alignItems: "center", padding: 10, paddingHorizontal: 16 },
+  bellWrap: { width: 22, height: 22, marginRight: 8, alignItems: "center", justifyContent: "center" },
+  bellBadge: { position: "absolute", top: -6, right: -8 },
   listContent: { paddingBottom: 24 },
   sectionHeader: {
     flexDirection: "row",
