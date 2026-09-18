@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+menubar/.build/
+menubar/build/
+.env
+
+# local-only, not project source
+.DS_Store
+.claude/scheduled_tasks.lock
+node_modules/
