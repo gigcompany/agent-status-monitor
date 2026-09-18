@@ -27,11 +27,11 @@ On first launch the app takes you straight to Settings. Paste the same
 Supabase project URL and **anon** key the menu bar app uses (Project Settings
 → API in your Supabase dashboard) - never the `service_role` key.
 
-There is no `local` or `cosmos` backend option here: `local` is a file on one
-Mac, unreachable from a phone, and shipping a Cosmos master key to a mobile
-app is a materially worse trade than the already-scoped-down Supabase anon
-key. If you need Cosmos from mobile, put a thin proxy in front of it rather
-than embedding the master key in the app.
+There is no `local` backend option here: it's a SQLite file on one Mac,
+unreachable from a phone by design. `supabase` is the only backend this app
+can use - if your Mac is set up with `local` (the project default, since
+it needs no account), switch it to `supabase` first:
+`./install.sh --backend supabase`.
 
 ## What it does
 

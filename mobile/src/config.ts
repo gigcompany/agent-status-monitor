@@ -3,8 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 /**
  * Same fields as ~/.agent-status/config.env on the desktop, just entered by
  * hand here since there is no shared filesystem to read it from. Only
- * Supabase is supported: it is the only backend reachable from a phone
- * without exposing a Cosmos account key or a machine-local SQLite file.
+ * Supabase is supported: `local` is a SQLite file on one Mac, unreachable
+ * from a phone - a cloud backend is required for this app to work at all.
  */
 export interface AppConfig {
   supabaseUrl: string;

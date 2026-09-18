@@ -6,17 +6,17 @@ only), so it can be dropped onto any agent host with a single scp and no install
 step.
 
 Backends are pluggable - see BACKENDS at the bottom of the backend section:
-  local     SQLite on this machine, no cloud account needed
-  supabase  Postgres via PostgREST (the default)
-  cosmos    Azure Cosmos DB NoSQL API
+  local     SQLite on this machine, no cloud account needed (the default)
+  supabase  Postgres via PostgREST - only backend reachable from the Android app
+
+See CONTRIBUTING.md for how to add another one (Azure Cosmos, Google
+Firestore, ...) - the adapter interface is three methods.
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
-import hmac
 import json
 import os
 import re
@@ -29,7 +29,6 @@ import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
-from email.utils import formatdate
 from pathlib import Path
 
 STATE_DIR = Path(os.environ.get("AGENT_STATUS_HOME", Path.home() / ".agent-status"))
@@ -64,11 +63,9 @@ COLUMNS = list(FIELDS.values())
 TO_CANONICAL = {column: field for field, column in FIELDS.items()}
 
 DEFAULTS = {
-    "backend": "supabase",
+    "backend": "local",
     "local_path": str(STATE_DIR / "status.db"),
     "supabase_table": "agent_tasks",
-    "cosmos_database": "agentmonitor",
-    "cosmos_container": "tasks",
     "ttl_hours": "168",       # 7 days for active tasks
     "done_ttl_hours": "48",   # finished tasks are history, expire them sooner
     "poll_seconds": "5",
@@ -385,119 +382,14 @@ class SupabaseBackend(Backend):
         return f"supabase {self.url} (table: {self.table})"
 
 
-# -------------------------------------------------------------- cosmos
-
-class CosmosBackend(Backend):
-    """Azure Cosmos DB NoSQL API, signed with the account master key."""
-
-    name = "cosmos"
-    API_VERSION = "2018-12-31"
-
-    def __init__(self, cfg: dict):
-        require(cfg, "cosmos_endpoint", "cosmos_key")
-        self.endpoint = cfg["cosmos_endpoint"].rstrip("/")
-        self.key = cfg["cosmos_key"]
-        self.database = cfg.get("cosmos_database") or DEFAULTS["cosmos_database"]
-        self.container = cfg.get("cosmos_container") or DEFAULTS["cosmos_container"]
-
-    @property
-    def _link(self) -> str:
-        return f"dbs/{self.database}/colls/{self.container}"
-
-    def _auth(self, verb: str, resource_type: str, link: str, date: str) -> str:
-        # Cosmos signs verb\nresourceType\nresourceLink\nx-ms-date\ndate\n
-        # The resource link is case-sensitive; everything else is lowercased.
-        payload = f"{verb.lower()}\n{resource_type.lower()}\n{link}\n{date.lower()}\n\n"
-        signature = base64.b64encode(
-            hmac.new(base64.b64decode(self.key), payload.encode("utf-8"), hashlib.sha256).digest()
-        ).decode("utf-8")
-        return urllib.parse.quote(f"type=master&ver=1.0&sig={signature}", safe="")
-
-    def _headers(self, verb: str, resource_type: str, link: str, extra: dict | None = None) -> dict:
-        date = formatdate(timeval=None, localtime=False, usegmt=True)
-        headers = {
-            "Authorization": self._auth(verb, resource_type, link, date),
-            "x-ms-date": date,
-            "x-ms-version": self.API_VERSION,
-            "Content-Type": "application/json",
-        }
-        headers.update(extra or {})
-        return headers
-
-    @staticmethod
-    def _to_cosmos(doc: dict) -> dict:
-        """Cosmos keeps the canonical shape, but expiry is its native `ttl`."""
-        out = {key: value for key, value in doc.items() if key != "expiresAt"}
-        expires = doc.get("expiresAt")
-        if expires:
-            remaining = datetime.fromisoformat(expires.replace("Z", "+00:00")) - datetime.now(timezone.utc)
-            out["ttl"] = max(int(remaining.total_seconds()), 60)
-        return out
-
-    def upsert(self, doc: dict) -> None:
-        status, body = http(
-            f"{self.endpoint}/{self._link}/docs",
-            method="POST",
-            headers=self._headers("POST", "docs", self._link, {
-                "x-ms-documentdb-is-upsert": "true",
-                "x-ms-documentdb-partitionkey": json.dumps([doc["agentId"]]),
-            }),
-            body=self._to_cosmos(doc),
-        )
-        if status >= 300:
-            die(f"cosmos upsert failed - HTTP {status}: {body}")
-
-    def get(self, task_id: str, agent_id: str) -> dict | None:
-        link = f"{self._link}/docs/{task_id}"
-        status, body = http(
-            f"{self.endpoint}/{link}",
-            headers=self._headers("GET", "docs", link, {
-                "x-ms-documentdb-partitionkey": json.dumps([agent_id]),
-            }),
-        )
-        if status == 404:
-            return None
-        if status >= 300:
-            die(f"cosmos read failed - HTTP {status}: {body}")
-        return json.loads(body)
-
-    def list(self, since: str) -> list:
-        # No ORDER BY: the Cosmos gateway will not serve a cross-partition sort
-        # over the REST API. Callers sort the result themselves.
-        status, body = http(
-            f"{self.endpoint}/{self._link}/docs",
-            method="POST",
-            headers=self._headers("POST", "docs", self._link, {
-                "Content-Type": "application/query+json",
-                "x-ms-documentdb-isquery": "true",
-                "x-ms-documentdb-query-enablecrosspartition": "true",
-                "x-ms-max-item-count": "200",
-            }),
-            body={
-                "query": "SELECT * FROM c WHERE c.updatedAt > @since",
-                "parameters": [{"name": "@since", "value": since}],
-            },
-        )
-        if status >= 300:
-            die(f"cosmos query failed - HTTP {status}: {body}")
-        docs = json.loads(body or "{}").get("Documents", [])
-        docs.sort(key=lambda d: d.get("updatedAt") or "", reverse=True)
-        return docs
-
-    def check(self) -> str:
-        self.list(now_iso())
-        return f"cosmos {self.endpoint} ({self.database}/{self.container})"
-
-
 BACKENDS = {
     "local": LocalBackend,
     "supabase": SupabaseBackend,
-    "cosmos": CosmosBackend,
 }
 
 
 def make_backend(cfg: dict) -> Backend:
-    backend = cfg.get("backend", "supabase")
+    backend = cfg.get("backend", "local")
     if backend not in BACKENDS:
         die(f"unknown backend '{backend}'. Choose one of: {', '.join(sorted(BACKENDS))}")
     return BACKENDS[backend](cfg)
@@ -570,7 +462,6 @@ def cmd_setup(args, cfg):
 
     existing = parse_env_file(CONFIG_PATH) if CONFIG_PATH.exists() else {}
     for field in ("backend", "supabase_url", "supabase_key", "supabase_table",
-                  "cosmos_endpoint", "cosmos_key", "cosmos_database", "cosmos_container",
                   "local_path", "agent_id", "agent_kind", "agent_label"):
         value = getattr(args, field, None)
         if value:
@@ -966,7 +857,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_setup = sub.add_parser("setup", help="write config and verify the backend")
     for flag in ("backend", "supabase-url", "supabase-key", "supabase-table",
-                 "cosmos-endpoint", "cosmos-key", "cosmos-database", "cosmos-container",
                  "local-path", "agent-id", "agent-kind", "agent-label"):
         p_setup.add_argument(f"--{flag}", dest=flag.replace("-", "_"))
     p_setup.set_defaults(func=cmd_setup)

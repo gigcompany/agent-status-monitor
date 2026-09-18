@@ -19,7 +19,7 @@ codebase. Worth deciding up front:
   separate implementation to maintain, in a language nothing else in this
   repo uses.
 - **Tauri or similar** — smaller binary, and the config/networking layer
-  (reading `config.env`-equivalent, the Supabase/Cosmos fetch logic) could
+  (reading `config.env`-equivalent, the backend fetch logic) could
   plausibly be shared with something else if this project ever needs a
   Linux tray app too. More new tooling to introduce for a first contribution
   to this repo, though.
@@ -45,15 +45,15 @@ infrastructure, not just app code:
   this via a Database Webhook or an Edge Function reacting to
   `postgres_changes` — the table already has Realtime enabled
   (`backends/supabase/schema.sql`), which is the prerequisite piece already
-  in place. Cosmos would need its own path (a Function triggered off the
-  Change Feed).
+  in place.
 - Token revocation/cleanup when a device stops being reachable (invalid
   token errors from FCM should prune the registration, not retry forever).
 
 This is meaningfully bigger than it sounds from the outside — it's the one
-item here that's actual backend infrastructure, not just a new client.
-Worth scoping down first: even "push notifications for Supabase only, no
-Cosmos support" would be a real, useful contribution on its own.
+item here that's actual backend infrastructure, not just a new client. Since
+`local` has no server to run a trigger on, this only makes sense for
+`supabase` (or a future backend with the same shape) - not a limitation
+worth working around, just worth being upfront about in a PR description.
 
 ## 3. Testing support on other agent harnesses (OpenCode, etc.)
 
@@ -75,34 +75,50 @@ If a harness turns out to have no hook mechanism at all, that's a valid
 finding too — document it, and the skill-only fallback is still real
 value.
 
+**Concrete known gap, found this way: Hermes's `acp` launch mode.** Hermes
+itself has multiple launch paths - CLI (`hermes chat`), the gateway
+(Telegram/Slack/WhatsApp), Desktop/TUI, and `acp` (the Agent Communication
+Protocol some hosts, like Buzz, use to launch Hermes as a subprocess).
+Confirmed by comparing a live gateway process's logs (which log `shell hook
+registered: pre_llm_call -> ...` explicitly at startup) against a live ACP
+session's (which logs 60+ other plugin registrations individually, in the
+same detail, but never once logs shell hooks, across multiple agent
+workers): **`hermes acp` never registers Hermes's shell hooks at all,
+regardless of how correctly `config.yaml` is set up.** The skill-only
+fallback still works there (confirmed: skill tool calls fire normally in
+an ACP session) - hooks just don't. This is inside Hermes's own code, not
+this project's, so it's not directly fixable here; worth reporting
+upstream. Anyone integrating with an ACP-based host should expect
+skill-only reporting until Hermes's ACP adapter wires up shell hooks.
+
 ## 4. Real-time status updates
 
-Everything currently polls (every 2–5 seconds depending on backend). Cosmos
-DB has no server push at all — its "change feed" is pull-based internally,
-so there's genuinely no way to get real push out of it without adding
-external infrastructure (Azure Web PubSub or similar sitting in front of
-it). Supabase is a different story: **Realtime is already enabled** on the
-table (see the bottom of `backends/supabase/schema.sql`), so this is mostly
-a client-side change for that backend — swap polling for a
-`postgres_changes` subscription in each app.
+Everything currently polls (2s for `local`, 5s for `supabase`). `local` has
+no way to push at all - it's a file, there's no server to notify anyone.
+`supabase`'s underlying table already has **Realtime enabled**
+(see the bottom of `backends/supabase/schema.sql`), so getting real push out
+of it is mostly a client-side change - swap polling for a
+`postgres_changes` subscription in each app. That makes this the
+lowest-effort item on this whole list for the backend that matters most
+(it's also the only one the Android app can use at all).
 
-Worth being precise in a PR about which backend it covers. "Realtime for
-Supabase, still polling for local/Cosmos" is an honest, shippable increment;
-claiming full realtime when only one backend has it would be misleading to
-users picking a backend based on this list.
+## 5. Support for other backends (Google Firestore, Azure Cosmos, etc.)
 
-## 5. Support for other backends (Google Firestore, etc.)
-
-Same shape as adding Cosmos was: implement `upsert`/`get`/`list` in the CLI,
-`fetchTasks` in the Swift app, and the equivalent in the mobile app's
-`api.ts`, following the `StatusBackend` pattern already in place. See
-`CONTRIBUTING.md`'s "Adding a backend" section.
+Implement `upsert`/`get`/`list` in the CLI, `fetchTasks` in the Swift app,
+and the equivalent in the mobile app's `api.ts`, following the
+`StatusBackend` pattern already in place. See `CONTRIBUTING.md`'s
+["Adding a backend adapter"](CONTRIBUTING.md#adding-a-backend-adapter) for
+the full walkthrough, including a complete, previously-tested Cosmos
+implementation preserved there as a worked example - re-adding Cosmos is
+largely "restore that code and re-verify it," not a from-scratch build (it
+was removed to keep the default install small, not because it didn't work
+- see the README's Backends section).
 
 Firestore specifically is worth calling out because it has a real
-`onSnapshot` listener API — genuine push, not polling — which nothing else
-here has today. If someone builds Firestore support, it's a natural
-candidate to *also* pick up item #4 for that backend specifically, since
-the hard part (a backend that can push) would already be done.
+`onSnapshot` listener API — genuine push, not polling — which nothing here
+has today. If someone builds Firestore support, it's a natural candidate to
+*also* pick up item #4 for that backend specifically, since the hard part
+(a backend that can push) would already be done.
 
 ---
 
@@ -116,10 +132,9 @@ the hard part (a backend that can push) would already be done.
   `config.toml` is often already claimed by something else, so the
   installer won't touch it. Reporting from Codex today is skill-only (the
   model has to remember to call the CLI).
-- **No per-agent key revocation.** Every agent on a given backend shares one
-  key (Supabase anon key or Cosmos master key). Revoking one means rotating
-  the shared key and reinstalling everywhere. Supabase Auth (per-agent JWTs)
-  or Cosmos resource tokens would fix this properly.
+- **No per-agent key revocation.** Every agent on `supabase` shares one anon
+  key. Revoking one means rotating the shared key and reinstalling
+  everywhere. Supabase Auth (per-agent JWTs) would fix this properly.
 - **The menu bar app isn't notarized**, so notifications go through an
   `osascript` fallback attributed to Script Editor instead of the app
   itself. Needs a paid Apple Developer account and a signed release build.

@@ -10,9 +10,9 @@ user's Mac menu bar app watches that board in near real time. When you mark a
 task `waiting`, they get a desktop notification — that is the fastest way to
 unblock yourself.
 
-Where the board actually lives (a local SQLite file, Supabase, or Azure Cosmos)
-is configured on the machine and is not your concern; the commands are the same
-either way.
+Where the board actually lives (a local SQLite file, or Supabase for a board
+that spans machines) is configured on the machine and is not your concern; the
+commands are the same either way.
 
 The command is `agent-status` (or `python3 <skill>/scripts/agent_status.py`).
 
@@ -84,4 +84,4 @@ run the installer once on this machine:
 <repo>/install-remote.sh user@host    # a remote agent box
 ```
 
-Tell the user that rather than trying to configure Cosmos credentials yourself.
+Tell the user that rather than trying to configure the backend yourself.

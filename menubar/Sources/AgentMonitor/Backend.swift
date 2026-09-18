@@ -25,15 +25,11 @@ enum BackendError: LocalizedError {
 /// Reads the same `~/.agent-status/config.env` the CLI uses, so the app and the
 /// agents can never disagree about where status lives.
 struct AppConfig {
-    var backend: String = "supabase"
+    var backend: String = "local"
     var localPath: String = "~/.agent-status/status.db"
     var supabaseURL: String = ""
     var supabaseKey: String = ""
     var supabaseTable: String = "agent_tasks"
-    var cosmosEndpoint: String = ""
-    var cosmosKey: String = ""
-    var cosmosDatabase: String = "agentmonitor"
-    var cosmosContainer: String = "tasks"
     var pollSeconds: Int = 5
     var lookbackHours: Int = 12
     var notifyWaiting: Bool = true
@@ -70,15 +66,11 @@ struct AppConfig {
         }
 
         var config = AppConfig()
-        config.backend = (read("AGENT_STATUS_BACKEND") ?? "supabase").lowercased()
+        config.backend = (read("AGENT_STATUS_BACKEND") ?? "local").lowercased()
         config.localPath = read("AGENT_STATUS_LOCAL_PATH") ?? config.localPath
         config.supabaseURL = read("AGENT_STATUS_SUPABASE_URL") ?? ""
         config.supabaseKey = read("AGENT_STATUS_SUPABASE_KEY") ?? ""
         config.supabaseTable = read("AGENT_STATUS_SUPABASE_TABLE") ?? config.supabaseTable
-        config.cosmosEndpoint = read("AGENT_STATUS_COSMOS_ENDPOINT") ?? ""
-        config.cosmosKey = read("AGENT_STATUS_COSMOS_KEY") ?? ""
-        config.cosmosDatabase = read("AGENT_STATUS_COSMOS_DATABASE") ?? config.cosmosDatabase
-        config.cosmosContainer = read("AGENT_STATUS_COSMOS_CONTAINER") ?? config.cosmosContainer
         config.pollSeconds = read("AGENT_STATUS_POLL_SECONDS").flatMap(Int.init) ?? config.pollSeconds
         config.lookbackHours = read("AGENT_STATUS_LOOKBACK_HOURS").flatMap(Int.init) ?? config.lookbackHours
         config.notifyWaiting = boolean(read("AGENT_STATUS_NOTIFY_WAITING"), default: true)
@@ -108,18 +100,8 @@ struct AppConfig {
                 )
             }
             return SupabaseBackend(url: supabaseURL, key: supabaseKey, table: supabaseTable)
-        case "cosmos":
-            guard !cosmosEndpoint.isEmpty, !cosmosKey.isEmpty else {
-                throw BackendError.notConfigured(
-                    "Cosmos not configured - set AGENT_STATUS_COSMOS_ENDPOINT and _KEY"
-                )
-            }
-            return CosmosBackend(
-                endpoint: cosmosEndpoint, key: cosmosKey,
-                database: cosmosDatabase, container: cosmosContainer
-            )
         default:
-            throw BackendError.notConfigured("Unknown backend '\(backend)' - use local, supabase or cosmos")
+            throw BackendError.notConfigured("Unknown backend '\(backend)' - use local or supabase")
         }
     }
 }

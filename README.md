@@ -62,7 +62,7 @@ Three layers, in order of how much they can do without your help:
    See [`TODO.md`](TODO.md) for hook support on other harnesses.
 
 ```
-  agent ──(agent-status CLI)──> backend (Supabase / Cosmos / local SQLite)
+  agent ──(agent-status CLI)──> backend (local SQLite by default, or Supabase)
                                      │
                        polled every few seconds by
                                      │
@@ -87,20 +87,23 @@ cd agent-status-monitor
   profile)
 - `--login` starts the menu bar app at login
 - The installer asks which backend to use if you haven't set one in `.env`
-  first — **Supabase is the default** and the one to pick unless you already
-  run Azure
+  first — **local is the default**: no account, no keys, works the moment
+  you run the command. Only switch to Supabase if you need the board to
+  reach beyond this one Mac (see [Backends](#backends) below).
 
 Any agent you run *on this same laptop* — Claude Code, Codex, a local Hermes
-instance — is wired up by this one command. Agents running elsewhere (a
-cloud VPS, a spare machine) need the separate step below.
+instance — is wired up by this one command, and shows up on the board with
+zero cloud setup. Agents running elsewhere (a cloud VPS, a spare machine)
+need the separate step below, **and** a cloud backend - `local` cannot
+reach them, by design (it's a file on this one Mac).
 
 ### Android app
 
 A read-only companion app lives in [`mobile/`](mobile) — Expo, Material You
 theming, same board. See [`mobile/README.md`](mobile/README.md) to build and
-run it. It only supports the Supabase backend (a phone can't read a file on
-your Mac, and a Cosmos master key doesn't belong on a mobile device — see
-[Security](#security)).
+run it. **It needs the `supabase` backend, not `local`** — a phone cannot
+read a SQLite file that lives on your Mac. If you only care about the menu
+bar app, `local` is fine and this doesn't apply.
 
 ## Setting up a cloud server or remote agent box
 
@@ -135,9 +138,12 @@ auto-generated agent name if you want something more specific than
 ```bash
 git clone https://github.com/gigcompany/agent-status-monitor.git
 cd agent-status-monitor
-cp .env.example .env   # fill in the SAME Supabase (or Cosmos) credentials
+cp .env.example .env   # fill in the SAME Supabase credentials as your laptop
 ./install.sh --backend supabase --hooks --no-app
 ```
+
+(`--backend supabase` is required here - `local` is the installer's default,
+but a server's `local` board would be its own, invisible to your laptop.)
 
 `--no-app` skips the menu bar app build entirely — most servers don't have a
 GUI, and even the ones that do don't need a second copy of the app running.
@@ -145,22 +151,34 @@ GUI, and even the ones that do don't need a second copy of the app running.
 ## Backends
 
 Pick one with `AGENT_STATUS_BACKEND` in `.env` (or let the installer ask).
+**Two ship today, on purpose** — every backend is a real maintenance burden
+(wire format, auth, rate limits, a real account to test against), and this
+project would rather have two that work than five that might. See
+[Adding a backend adapter](#adding-a-backend-adapter) if you want a third.
 
-| Backend | Setup | Spans machines | Cost | Config needed |
+| Backend | Setup | Spans machines | Android app | Cost |
 |---|---|---|---|---|
-| **`local`** | none | no | free | `AGENT_STATUS_LOCAL_PATH` (optional, has a default) |
-| **`supabase`** *(default)* | run one SQL file | yes | free tier | `AGENT_STATUS_SUPABASE_URL`, `_KEY` |
-| **`cosmos`** | Azure account | yes | ~$0.20–0.50/mo serverless | `AGENT_STATUS_COSMOS_ENDPOINT`, `_KEY` |
+| **`local`** *(default)* | none | no | ✗ can't reach it | free |
+| **`supabase`** | run one SQL file | yes | ✓ | free tier |
 
-### `local` — no cloud account, no keys
+### `local` — the default: no account, no keys, works immediately
 
 SQLite at `~/.agent-status/status.db`. Every agent on that one machine
 writes to it in WAL mode, so a dozen of them can report concurrently without
 corrupting it. Since a local file read is free, the menu bar app polls it
-every 2 seconds instead of 5. Use this only if every agent you want to see
-runs on the same Mac as the app — it cannot span machines.
+every 2 seconds instead of 5.
 
-### `supabase` — the default, spans machines, free tier
+This is enough for the common case: Claude Code, Codex, and Hermes all
+running on your own laptop, watched by the menu bar app on that same laptop.
+**The limitation is real, though: it cannot span machines.** If any of these
+are true, you need `supabase` instead:
+
+- You want the **Android app** to show anything (a phone cannot read a file
+  that lives on your Mac)
+- You have agents on a **remote server or VPS** you want on the same board
+- You run **more than one Mac** and want one shared board
+
+### `supabase` — spans machines, required for mobile, free tier
 
 1. Create a project at [supabase.com](https://supabase.com) — free tier, no
    card required.
@@ -169,27 +187,25 @@ runs on the same Mac as the app — it cannot span machines.
 3. **Project Settings → API** → copy the **Project URL** and the
    **anon / public** key (not `service_role` — see
    [Security](#security)).
-4. Put both in `.env`, or answer the installer's prompts.
+4. Put both in `.env`, or answer the installer's prompts, or switch later:
+   `./install.sh --backend supabase`.
 
 The schema enables Realtime on the table already, for when the polling
 viewers become websocket-based (see [`TODO.md`](TODO.md)).
 
-### `cosmos` — if you're already on Azure
+### Adding a backend adapter
 
-```bash
-./install.sh --backend cosmos --provision-azure
-```
+See [`CONTRIBUTING.md`](CONTRIBUTING.md#adding-a-backend-adapter) for the
+full walkthrough — what the three methods are, and a worked example (Azure
+Cosmos, which this project shipped and later removed - see below) plus notes
+on what a Firestore adapter would look like.
 
-Creates a serverless Cosmos DB account, database, and container for you via
-the `az` CLI (must already be logged in). Or point `AGENT_STATUS_COSMOS_*` at
-an account you already have.
-
-### Adding another backend
-
-Three methods in `skill/agent-status/scripts/agent_status.py`
-(`upsert`, `get`, `list`) plus a matching `fetchTasks` in the Swift app and
-the TypeScript mobile app. See [`TODO.md`](TODO.md) for Firestore, which is
-next in line.
+**Why Cosmos isn't here anymore:** an earlier version of this project
+supported Azure Cosmos DB, built and verified against a real account.
+It was removed to keep the shipped surface to backends the maintainers can
+actually keep working - not a statement that Cosmos itself doesn't work.
+The code is preserved as a reference implementation in CONTRIBUTING.md; a PR
+that brings it back with tests is welcome.
 
 ## Connecting different agent runtimes
 
@@ -326,18 +342,18 @@ over automatically, no code change needed.
 
 ## Security
 
-- **Keys are shared with every agent host.** For `supabase` that's the anon
-  key under a permissive RLS policy; for `cosmos` it's the account master
-  key. Both grant read/write to anyone holding them. Use a dedicated project
-  or account, not one with anything sensitive already in it.
+- **The Supabase anon key is shared with every agent host.** It grants
+  read/write to anyone holding it, under a permissive RLS policy. Use a
+  dedicated project, not one with anything sensitive already in it. `local`
+  has no equivalent risk - nothing ever leaves the machine.
 - Config files are written `0600`; `install-remote.sh` pipes keys over the
   existing SSH session rather than passing them as arguments, so they never
   land in the remote process list or shell history.
-- **Task text leaves your machine** on the cloud backends. Keep secrets out
-  of task descriptions, or use the `local` backend.
+- **Task text leaves your machine** on `supabase`. Keep secrets out of task
+  descriptions, or use `local`, where nothing leaves the machine at all.
 - Revoking one remote agent means rotating the shared key and re-running the
-  installers. For per-agent revocation, switch to Supabase Auth or Cosmos
-  resource tokens (not built yet — see [`TODO.md`](TODO.md)).
+  installers. For per-agent revocation, switch to Supabase Auth (not built
+  yet — see [`TODO.md`](TODO.md)).
 
 ## Development
 

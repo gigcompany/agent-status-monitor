@@ -18,7 +18,6 @@ BACKEND=""
 WITH_HOOKS=0
 WITH_LOGIN=0
 SKIP_APP=0
-PROVISION_AZURE=0
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 info() { printf '    %s\n' "$1"; }
@@ -32,17 +31,15 @@ while [[ $# -gt 0 ]]; do
         --hooks)           WITH_HOOKS=1; shift ;;
         --login)           WITH_LOGIN=1; shift ;;
         --no-app)          SKIP_APP=1; shift ;;
-        --provision-azure) PROVISION_AZURE=1; BACKEND="${BACKEND:-cosmos}"; shift ;;
         -h|--help)
             sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             cat <<'USAGE'
 
 options:
-  --backend local|supabase|cosmos   skip the prompt
-  --provision-azure                 create the Cosmos resources with az cli
-  --hooks                           auto-report via lifecycle hooks (Claude Code + every Hermes profile)
-  --login                           start the menu bar app at login
-  --no-app                          CLI + skill only (for servers)
+  --backend local|supabase   skip the prompt
+  --hooks                    auto-report via lifecycle hooks (Claude Code + every Hermes profile)
+  --login                    start the menu bar app at login
+  --no-app                   CLI + skill only (for servers)
 USAGE
             exit 0 ;;
         *) fail "unknown option: $1" ;;
@@ -94,22 +91,20 @@ if [[ -z "$BACKEND" ]]; then
     if [[ -t 0 ]]; then
         echo
         echo "  Where should agent status be stored?"
-        echo "    1) local     SQLite on this Mac. No account, no keys. Local agents only."
-        echo "    2) supabase  Free Postgres. Works across machines.  (default)"
-        echo "    3) cosmos    Azure Cosmos DB."
+        echo "    1) local     SQLite on this Mac. No account, no keys.        (default)"
+        echo "    2) supabase  Free Postgres. Works across machines - required"
+        echo "                 if you want the Android app to see anything."
         echo
-        read -r -p "  Choose [1-3, default 2]: " choice
-        case "${choice:-2}" in
+        read -r -p "  Choose [1-2, default 1]: " choice
+        case "${choice:-1}" in
             1) BACKEND="local" ;;
             2) BACKEND="supabase" ;;
-            3) BACKEND="cosmos" ;;
             *) fail "invalid choice: $choice" ;;
         esac
     else
-        # Piped install with nothing to ask: local is the only backend that can
-        # work with no keys, so it is the safe default.
+        # Piped install with nothing to ask: local needs no keys, so it is
+        # always the safe unattended default.
         BACKEND="local"
-        warn "no terminal to prompt with - defaulting to the local backend"
     fi
 fi
 info "backend: $BACKEND"
@@ -156,29 +151,6 @@ case "$BACKEND" in
             fi
         fi
         grep -qE '^AGENT_STATUS_SUPABASE_TABLE=' "$CONFIG" || set_cfg AGENT_STATUS_SUPABASE_TABLE agent_tasks
-        ;;
-    cosmos)
-        if [[ "$PROVISION_AZURE" == "1" ]]; then
-            command -v az >/dev/null 2>&1 || fail "--provision-azure needs the az cli"
-            RG="${AZURE_RESOURCE_GROUP:-agent-monitor-rg}"
-            ACCOUNT="${AZURE_COSMOS_ACCOUNT:-agent-monitor-$RANDOM}"
-            LOCATION="${AZURE_LOCATION:-centralindia}"
-            say "Provisioning Azure (this takes a few minutes)"
-            az group create -n "$RG" -l "$LOCATION" -o none
-            az cosmosdb create -n "$ACCOUNT" -g "$RG" \
-                --locations regionName="$LOCATION" failoverPriority=0 isZoneRedundant=False \
-                --capabilities EnableServerless --default-consistency-level Session -o none
-            az cosmosdb sql database create -a "$ACCOUNT" -g "$RG" -n agentmonitor -o none
-            az cosmosdb sql container create -a "$ACCOUNT" -g "$RG" -d agentmonitor -n tasks \
-                --partition-key-path "/agentId" --ttl -1 -o none
-            set_cfg AGENT_STATUS_COSMOS_ENDPOINT "$(az cosmosdb show -n "$ACCOUNT" -g "$RG" --query documentEndpoint -o tsv)"
-            set_cfg AGENT_STATUS_COSMOS_KEY "$(az cosmosdb keys list -n "$ACCOUNT" -g "$RG" --query primaryMasterKey -o tsv)"
-            set_cfg AGENT_STATUS_COSMOS_DATABASE agentmonitor
-            set_cfg AGENT_STATUS_COSMOS_CONTAINER tasks
-            info "created $ACCOUNT in $RG"
-        elif ! grep -qE '^AGENT_STATUS_COSMOS_ENDPOINT=.+' "$CONFIG"; then
-            fail "cosmos needs AGENT_STATUS_COSMOS_ENDPOINT and _KEY in $CONFIG (or use --provision-azure)"
-        fi
         ;;
     *) fail "unknown backend: $BACKEND" ;;
 esac

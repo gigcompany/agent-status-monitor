@@ -139,8 +139,8 @@ struct AgentTask: Codable, Identifiable, Equatable {
         waitingSince = AgentTask.parseDate(try? c.decodeIfPresent(String.self, forKey: .waitingSince) ?? nil)
     }
 
-    /// Handles the three shapes the backends produce: Cosmos and SQLite write
-    /// `...Z`, while Postgres returns an offset and up to 6 fractional digits.
+    /// Handles the shapes the backends produce: SQLite writes `...Z`, while
+    /// Postgres returns an offset and up to 6 fractional digits.
     static func parseDate(_ value: String?) -> Date? {
         guard let value, !value.isEmpty else { return nil }
 
